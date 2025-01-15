@@ -119,3 +119,22 @@ llm_load_tensors: offloaded 33/81 layers to GPU
 llm_load_tensors:        CUDA0 model buffer size = 16240.69 MiB
 llm_load_tensors:   CPU_Mapped model buffer size = 24302.42 MiB
 ```
+
+
+9.1 Local build llama-cpp-python and llama.cpp with pip in VENV
+```
+(Verifying now...)
+
+git clone https://github.com/abetlen/llama-cpp-python.git
+cd llama-cpp-python
+cd vendor
+rmdir llama.cpp
+
+git clone https://github.com/ggerganov/llama.cpp.git
+cd llama.cpp
+(revert to current llama-cpp-python verified version, close notepad)
+git revert f7cd13301c2a88f97073fd119072b4cc92c08df1
+cd ..
+cd ..
+pip install -e .
+```
