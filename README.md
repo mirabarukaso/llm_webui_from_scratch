@@ -74,10 +74,8 @@ py -m pip install numpy==1.26.4
 
 (Now you can goto #11 to perform a quick test)
 ```
-9.1 Compile llama-cpp-python and llama.cpp with CUDA Support from local pip
+9.1 (NOT WORKING) Compile llama-cpp-python and llama.cpp with CUDA Support from local pip
 ```
-(Verifying now...)
-
 git clone https://github.com/abetlen/llama-cpp-python.git
 cd llama-cpp-python
 cd vendor
@@ -89,7 +87,12 @@ cd llama.cpp
 git revert f7cd13301c2a88f97073fd119072b4cc92c08df1
 cd ..
 cd ..
+
+set CMAKE_ARGS="-DGGML_CUDA=ON"
 py -m pip install -e .
+
+(NOT WORKING)
+You will get lots of function missing error: llama_rope_type, llama_rope_freq_scale_train, llama_lora_adapter_init ......  
 ```
 
 10. Install pre-build llama-cpp-python with CUDA Support from [llama-cpp-python](https://github.com/abetlen/llama-cpp-python)
