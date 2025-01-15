@@ -58,7 +58,7 @@ python -m venv .\venv
 py -m pip install --upgrade pip
 py -m pip install -r .\Scripts\requirements.txt
 ```
-9. Compile llama-cpp-python with CUDA Support, for pre-build go to 10#    
+9. Compile llama-cpp-python with CUDA Support from pip source, for pre-build go to 10#    
 ```
 (Current latest llama.cpp has some issues with llama-cpp-python, wait until they fix it or we have to use pip version)
 
@@ -74,6 +74,24 @@ py -m pip install numpy==1.26.4
 
 (Now you can goto #11 to perform a quick test)
 ```
+9.1 Compile llama-cpp-python and llama.cpp with CUDA Support from local pip
+```
+(Verifying now...)
+
+git clone https://github.com/abetlen/llama-cpp-python.git
+cd llama-cpp-python
+cd vendor
+rmdir llama.cpp
+
+git clone https://github.com/ggerganov/llama.cpp.git
+cd llama.cpp
+(Revert to current llama-cpp-python verified version, close notepad. Check commit id from https://github.com/abetlen/llama-cpp-python/tree/main/vendor)
+git revert f7cd13301c2a88f97073fd119072b4cc92c08df1
+cd ..
+cd ..
+py -m pip install -e .
+```
+
 10. Install pre-build llama-cpp-python with CUDA Support from [llama-cpp-python](https://github.com/abetlen/llama-cpp-python)
 ```
 py -m pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu125
@@ -118,23 +136,4 @@ llm_load_tensors: offloading 33 repeating layers to GPU
 llm_load_tensors: offloaded 33/81 layers to GPU
 llm_load_tensors:        CUDA0 model buffer size = 16240.69 MiB
 llm_load_tensors:   CPU_Mapped model buffer size = 24302.42 MiB
-```
-
-
-9.1 Local build llama-cpp-python and llama.cpp with pip in VENV
-```
-(Verifying now...)
-
-git clone https://github.com/abetlen/llama-cpp-python.git
-cd llama-cpp-python
-cd vendor
-rmdir llama.cpp
-
-git clone https://github.com/ggerganov/llama.cpp.git
-cd llama.cpp
-(revert to current llama-cpp-python verified version, close notepad)
-git revert f7cd13301c2a88f97073fd119072b4cc92c08df1
-cd ..
-cd ..
-pip install -e .
 ```
