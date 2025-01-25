@@ -11,7 +11,6 @@ MAX_IMAGE_SIZE = 640
 
 SYSTEM_ROLE = [
 	"You are a helpful assistant.",
- 	"You are a cat, Mew~"
 ]
 
 LATEX_DELIMITERS_SET= [
@@ -22,7 +21,7 @@ LATEX_DELIMITERS_SET= [
 	{'left': "\\begin{alignat}", 'right': "\\end{alignat}", 'display': True},
 	{'left': "\\begin{gather}", 'right': "\\end{gather}", 'display': True},
 	{'left': "\\begin{CD}", 'right': "\\end{CD}", 'display': True},
-	{'left': "\\[", 'right': "\\]", 'display': True}
+	{'left': "\\[", 'right': "\\]", 'display': True},
 ]
 
 def check_vision_support(model_path, vision_keyword="-vision-"):	
@@ -98,7 +97,9 @@ def parse_arguments(path_prefix):
 	parser.add_argument("-f", "--finetune_path", type=str, default="", help="Path to finetune model.")
 	parser.add_argument("-t", "--n_threads", type=int, default=None, help="The number of threads to use when processing.")
 	parser.add_argument("-tb", "--n_threads_batch", type=int, default=None, help="The number of threads to use when batch processing.")
+	parser.add_argument("-lp", "--lora_patch", type=str, default=None, help="Path to a LoRA file to apply to the model.")
+	parser.add_argument("-ls", "--lora_scale", type=float, default=1.0, help="Lora scale, default 1.0.")
 	args = parser.parse_args()
 	title = os.path.basename(args.model_use)
-	return args.path_prefix, args.model_use, args.n_threads, args.n_threads_batch, args.n_gpu_layers, args.n_ctx, args.verbose, args.gguf_model, args.finetune_path, title
+	return args.path_prefix, args.model_use, args.n_threads, args.n_threads_batch, args.n_gpu_layers, args.n_ctx, args.verbose, args.gguf_model, args.finetune_path, args.lora_patch, args.lora_scale, title, 
 

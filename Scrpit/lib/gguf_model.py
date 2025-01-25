@@ -24,14 +24,18 @@ class llama_gguf:
 		def __call__(self, *args, **kwargs):
 			return self.event.is_set() 
 	
-	def load_model(self, prefix, model_name, n_threads=16, n_threads_batch=16, n_gpu_layers=45, n_ctx = 8192, verbose = False):
+	def load_model(self, prefix, model_name, n_threads=16, n_threads_batch=16, n_gpu_layers=45, n_ctx = 8192, verbose = False, lora_path = None, lora_scale=1.0):
 		# Load the model and processor and tokenizer
 		if str(model_name).startswith("GGUF_"):
 			gguf_filename = model_name.replace("GGUF_", "") + ".gguf"
 			gguf_full_filename = GGUF_PATH_TEMPLATE.format(prefix, model_name, gguf_filename)
 			print("{}Loading GGUF: {}\n| n_threads: {} | n_threads_batch: {} | n_gpu_layers: {} | n_ctx: {} | verbose: {} |{}".format(
 				Fore.LIGHTGREEN_EX, gguf_full_filename, n_threads, n_threads_batch, n_gpu_layers, n_ctx, verbose, Style.RESET_ALL))
-			self.model = Llama(gguf_full_filename, n_threads=n_threads, n_threads_batch=n_threads_batch, n_gpu_layers=n_gpu_layers, verbose = verbose, n_ctx=n_ctx)  
+			if lora_path:
+				print("{}Loading LORA: {} | Lora Scale: {}|{}".format(Fore.LIGHTRED_EX, lora_path, lora_scale, Style.RESET_ALL))
+				self.model = Llama(gguf_full_filename, n_threads=n_threads, n_threads_batch=n_threads_batch, n_gpu_layers=n_gpu_layers, verbose = verbose, n_ctx=n_ctx, lora_path=lora_path, lora_scale=lora_scale)  
+			else:
+				self.model = Llama(gguf_full_filename, n_threads=n_threads, n_threads_batch=n_threads_batch, n_gpu_layers=n_gpu_layers, verbose = verbose, n_ctx=n_ctx)  
 		else:
 			error_message = "Error: Unsupported model type."
 			raise RuntimeError("{}{}{}".format(Fore.LIGHTRED_EX, error_message, Style.RESET_ALL))

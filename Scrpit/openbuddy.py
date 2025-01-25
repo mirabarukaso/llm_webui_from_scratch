@@ -43,7 +43,7 @@ def generate_description(message: dict, history, system_role, input_use_history,
 
 if __name__ == "__main__":
 	PATH_TEMPLATE = os.path.splitext(os.path.basename(__file__))[0]
-	PATH_PREFIX, MODEL_USE, N_THREADS, N_THREADS_BATCH, N_GPU_LAYERS, N_CTX, VERBOSE, using_gguf_model, FINETUNE_PATH, TITLE = parse_arguments(PATH_TEMPLATE)
+	PATH_PREFIX, MODEL_USE, N_THREADS, N_THREADS_BATCH, N_GPU_LAYERS, N_CTX, VERBOSE, using_gguf_model, FINETUNE_PATH, LORA_PATH, LORA_SCALE, TITLE = parse_arguments(PATH_TEMPLATE)
 	vision_model = check_vision_support(MODEL_USE)
 	if using_gguf_model:
 		gguf.load_model(prefix=PATH_PREFIX, model_name=MODEL_USE, n_threads=N_THREADS, n_threads_batch=N_THREADS_BATCH, n_gpu_layers=N_GPU_LAYERS, n_ctx=N_CTX, verbose=VERBOSE)

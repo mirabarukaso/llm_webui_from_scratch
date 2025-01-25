@@ -245,7 +245,7 @@ def cancel_btn():
 
 if __name__ == "__main__":    
 	PATH_TEMPLATE = os.path.splitext(os.path.basename(__file__))[0]
-	PATH_PREFIX, MODEL_USE, N_THREADS, N_THREADS_BATCH, N_GPU_LAYERS, N_CTX, VERBOSE, using_gguf_model, FINETUNE_PATH, TITLE = parse_arguments(PATH_TEMPLATE)
+	PATH_PREFIX, MODEL_USE, N_THREADS, N_THREADS_BATCH, N_GPU_LAYERS, N_CTX, VERBOSE, using_gguf_model, FINETUNE_PATH, LORA_PATH, LORA_SCALE, TITLE = parse_arguments(PATH_TEMPLATE)
 	vision_model = check_vision_support(MODEL_USE, '-VL-')
  
 	if using_gguf_model:
@@ -266,7 +266,7 @@ if __name__ == "__main__":
 		)
 	textbox = None
 	if not vision_model:
-		textbox = gr.MultimodalTextbox(file_types=["text"], file_count="single", max_lines=200)
+		textbox = gr.MultimodalTextbox(file_types=["text", ".json"], file_count="single", max_lines=200)
 	else:
 		textbox = gr.MultimodalTextbox(file_types=["image"], file_count="multiple", max_lines=200)
     	
