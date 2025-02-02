@@ -99,7 +99,11 @@ def parse_arguments(path_prefix):
 	parser.add_argument("-tb", "--n_threads_batch", type=int, default=None, help="The number of threads to use when batch processing.")
 	parser.add_argument("-lp", "--lora_patch", type=str, default=None, help="Path to a LoRA file to apply to the model.")
 	parser.add_argument("-ls", "--lora_scale", type=float, default=1.0, help="Lora scale, default 1.0.")
+	parser.add_argument("-ml", "--mlock", type=bool, default=False, help="Force system to keep model in RAM rather than swapping or compressing.")
+	parser.add_argument("-nmm", "--no_mmap", type=bool, default=False, help="Do not memory-map model (slower load but may reduce pageouts if not using mlock.")
+
 	args = parser.parse_args()
 	title = os.path.basename(args.model_use)
-	return args.path_prefix, args.model_use, args.n_threads, args.n_threads_batch, args.n_gpu_layers, args.n_ctx, args.verbose, args.gguf_model, args.finetune_path, args.lora_patch, args.lora_scale, title, 
+	return args.path_prefix, args.model_use, args.n_threads, args.n_threads_batch, args.n_gpu_layers, args.n_ctx, args.verbose, args.gguf_model, args.finetune_path, args.lora_patch, args.lora_scale, args.mlock, args.no_mmap, title, 
+
 

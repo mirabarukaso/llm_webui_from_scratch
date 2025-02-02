@@ -1,4 +1,5 @@
-from llama_cpp import Llama
+from enum import Enum
+from llama_cpp import Llama, LLAMA_DEFAULT_SEED
 from PIL import Image
 from colorama import Fore, Style
 from .basic import GGUF_PATH_TEMPLATE, MAX_IMAGE_SIZE, read_file_content_to_prompt, append_file_content_to_prompt, resize_image, image_to_base64
@@ -6,8 +7,17 @@ import asyncio
 import os
 import mimetypes
 
+class ggml_numa_strategy(Enum):
+	GGML_NUMA_STRATEGY_DISABLED   = 0
+	GGML_NUMA_STRATEGY_DISTRIBUTE = 1
+	GGML_NUMA_STRATEGY_ISOLATE    = 2
+	GGML_NUMA_STRATEGY_NUMACTL    = 3
+	GGML_NUMA_STRATEGY_MIRROR     = 4
+
+    
 GGUF_PATH_TEMPLATE = '..\\{}\\{}\\{}'
 HISTORY_REPLACE_MARK = '__REPLACE_BY_REAL_HISTORY__'
+DEFAULT_SEED = LLAMA_DEFAULT_SEED
 
 class llama_gguf:
 	cancel_event = None
@@ -24,7 +34,7 @@ class llama_gguf:
 		def __call__(self, *args, **kwargs):
 			return self.event.is_set() 
 	
-	def load_model(self, prefix, model_name, n_threads=16, n_threads_batch=16, n_gpu_layers=45, n_ctx = 8192, verbose = False, lora_path = None, lora_scale=1.0):
+	def load_model(self, prefix, model_name, n_threads=16, n_threads_batch=16, n_gpu_layers=45, n_ctx = 8192, verbose = False, lora_path = None, lora_scale=1.0, use_mmap = False, use_mlock = False):
 		# Load the model and processor and tokenizer
 		if str(model_name).startswith("GGUF_"):
 			gguf_filename = model_name.replace("GGUF_", "") + ".gguf"
@@ -33,9 +43,9 @@ class llama_gguf:
 				Fore.LIGHTGREEN_EX, gguf_full_filename, n_threads, n_threads_batch, n_gpu_layers, n_ctx, verbose, Style.RESET_ALL))
 			if lora_path:
 				print("{}Loading LORA: {} | Lora Scale: {}|{}".format(Fore.LIGHTRED_EX, lora_path, lora_scale, Style.RESET_ALL))
-				self.model = Llama(gguf_full_filename, n_threads=n_threads, n_threads_batch=n_threads_batch, n_gpu_layers=n_gpu_layers, verbose = verbose, n_ctx=n_ctx, lora_path=lora_path, lora_scale=lora_scale)  
-			else:
-				self.model = Llama(gguf_full_filename, n_threads=n_threads, n_threads_batch=n_threads_batch, n_gpu_layers=n_gpu_layers, verbose = verbose, n_ctx=n_ctx)  
+				#self.model = Llama(gguf_full_filename, n_threads=n_threads, n_threads_batch=n_threads_batch, n_gpu_layers=n_gpu_layers, verbose = verbose, n_ctx=n_ctx, lora_path=lora_path, lora_scale=lora_scale, use_mmap=False)  
+			#else:
+			self.model = Llama(gguf_full_filename, n_threads=n_threads, n_threads_batch=n_threads_batch, n_gpu_layers=n_gpu_layers, verbose = verbose, n_ctx=n_ctx, lora_path=lora_path, lora_scale=lora_scale, use_mmap=use_mmap, use_mlock=use_mlock)  
 		else:
 			error_message = "Error: Unsupported model type."
 			raise RuntimeError("{}{}{}".format(Fore.LIGHTRED_EX, error_message, Style.RESET_ALL))
@@ -46,6 +56,7 @@ class llama_gguf:
 			convo = self._process_combined_history(history)
 		else:
 			convo = self._process_separate_history(history)
+		self._clean_history_marks(convo)
 		return convo
 
 	def _process_combined_history(self, history):
@@ -54,7 +65,6 @@ class llama_gguf:
 			human_content, system_content = self._extract_contents(entry)
 			self._append_human_content(convo, human_content)
 			self._append_system_content(convo, system_content)
-		self._clean_history_marks(convo)
 		return convo
 
 	def _process_separate_history(self, history):
@@ -66,7 +76,7 @@ class llama_gguf:
 			if human_content:
 				convo.append({"role": "user", "content": human_content + "\n"})
 			if system_content:
-				convo.append({"role": "system", "content": system_content + "\n"})
+				convo.append({"role": "assistant", "content": system_content + "\n"})
 		return convo
 
 	def _extract_contents(self, entry):
@@ -106,9 +116,13 @@ class llama_gguf:
 				return file_content + HISTORY_REPLACE_MARK
 		return content
 
-	def create_convo(self, system_role, history, prompt, input_use_history, file_data=None, file_type=None, combine_mode=False):
-		convo = [{'role': 'system', 'content': system_role + "\n"}]
-		if len(history) > 0 and input_use_history:
+	def create_convo(self, system_role, history, prompt, use_history, file_data=None, file_type=None, combine_mode=False, no_system_prompt=False, use_history_back=False):
+		convo = []
+  
+		if not no_system_prompt:
+			convo.append({'role': 'system', 'content': system_role + "\n"})
+   
+		if len(history) > 0 and use_history:
 			convo.extend(self.process_history(history, combine_mode))
    
 		if file_data:
@@ -122,6 +136,10 @@ class llama_gguf:
                   })
 		else:
 			convo.append({"role": "user", "content": prompt + "\n"})
+   
+		if len(history) > 0 and use_history_back and use_history:
+			convo = convo[::-1]
+
 		return convo
 
 	def do_chat(self, convo, input_temperature = 0.8, input_top_k = 40, input_top_p = 0.95, input_repetition_penalty = 1.1, input_max_new_tokens = 2048, stop = None):
