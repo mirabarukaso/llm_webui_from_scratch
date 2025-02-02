@@ -9,7 +9,6 @@ This is a (not) detailed guide for those who want to create their own local LLM 
 4. Recommend [HuggingFace](https://huggingface.co/) `(I know what you're looking for, but I won't talk about it.)`    
 
 # Create VENV and build llama-cpp-python with CUDA support
-0. In case you want to use a pre-build, go to #8
 1. Make sure you have installed `VS`, `NV Toolkit` and anything pip complains about missing. Google it yourself.
 2. Copy following files to VS
 ```
