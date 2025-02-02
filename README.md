@@ -58,10 +58,8 @@ python -m venv .\venv
 py -m pip install --upgrade pip
 py -m pip install -r .\Scripts\requirements.txt
 ```
-9. Compile llama-cpp-python with CUDA Support from pip source, for pre-build go to 10#    
+9. Compile llama-cpp-python with CUDA Support from GitHub source
 ```
-(Current latest llama.cpp has some issues with llama-cpp-python, wait until they fix it or we have to use pip version)
-
 set CMAKE_ARGS="-DGGML_CUDA=ON"
 (First time?)
 py -m pip install llama-cpp-python -v
@@ -69,21 +67,12 @@ py -m pip install llama-cpp-python -v
 py -m pip install "git+https://github.com/abetlen/llama-cpp-python.git" --force-reinstall --upgrade -v
 (Take a nap...)
 
-(Re-install numpy 1.26.4, you hve numpy-2.2.1 now. Solve:numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, got 88 from PyObject)
+(Optional: Re-install numpy 1.26.4, you hve numpy-2.2.1 now. Solve:numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, got 88 from PyObject)
 py -m pip install numpy==1.26.4
 
 (Now you can goto #11 to perform a quick test)
 ```
-
-10. Install pre-build llama-cpp-python with CUDA Support from [llama-cpp-python](https://github.com/abetlen/llama-cpp-python)
-```
-py -m pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu125
-```
-11. Install [PyTorch](https://pytorch.org/get-started/locally/) with CUDA support
-```
-py -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-```
-12. Now let's do a quick test, both "Failed" and "Success" are valid results.
+10. Now let's do a quick test, both "Failed" and "Success" are valid results.
 ```
 cd ..
 cd Scripts
@@ -94,17 +83,7 @@ INFO: This is NOT Vision model
 Loading GGUF: ..\Meta-Llama\GGUF_Meta-Llama-3.1-13B\Meta-Llama-3.1-13B.gguf
 | n_threads: 16 | n_threads_batch: 16 | n_gpu_layers: 33 | n_ctx: 20480 | verbose: True |
 Traceback (most recent call last):
-  File "C:\Users\oOkami\AppData\Local\Programs\Python\Python310\lib\runpy.py", line 196, in _run_module_as_main
-    return _run_code(code, main_globals, None,
-  File "C:\Users\oOkami\AppData\Local\Programs\Python\Python310\lib\runpy.py", line 86, in _run_code
-    exec(code, run_globals)
-  File "F:\test\Scripts\Meta-Llama.py", line 206, in <module>
-    gguf.load_model(prefix=PATH_PREFIX, model_name=MODEL_USE, n_threads=N_THREADS, n_threads_batch=N_THREADS_BATCH, n_gpu_layers=N_GPU_LAYERS, n_ctx=N_CTX, verbose=VERBOSE)
-  File "F:\test\Scripts\lib\gguf_model.py", line 34, in load_model
-    self.model = Llama(gguf_full_filename, n_threads=n_threads, n_threads_batch=n_threads_batch, n_gpu_layers=n_gpu_layers, verbose = verbose, n_ctx=n_ctx)
-  File "F:\test\venv\lib\site-packages\llama_cpp\llama.py", line 365, in __init__
-    raise ValueError(f"Model path does not exist: {model_path}")
-ValueError: Model path does not exist: ..\Meta-Llama\GGUF_Meta-Llama-3.1-13B\Meta-Llama-3.1-13B.gguf
+.....
 
 (Success)
 .....
@@ -112,7 +91,7 @@ ValueError: Model path does not exist: ..\Meta-Llama\GGUF_Meta-Llama-3.1-13B\Met
 
 To create a public link, set `share=True` in `launch()`.
 ```
-13. Make sure you are using CUDA now, open "Task Manager" check your GPU tab and debug output from console
+11. Make sure you are using CUDA now, open "Task Manager" check your GPU tab and debug output from console
 ```
 (llama.cpp debug info)
 llm_load_tensors: offloading 33 repeating layers to GPU
