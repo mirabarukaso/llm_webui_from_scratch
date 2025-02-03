@@ -1,13 +1,15 @@
 from lib.gguf_model import llama_gguf, DEFAULT_SEED
-import re
 import spaces
 import torch
 import gradio as gr
 from typing import Generator
 import gc
 import os
+import re
+import base64
 from lib.basic import check_vision_support, parse_arguments, resize_image
 from lib.basic import LATEX_DELIMITERS_SET, SYSTEM_ROLE, MODEL_PATH_TEMPLATE, MAX_IMAGE_SIZE
+from lib.comfyui import comfyui, extract_comfyui_content, TRIGGER_LEFT, TRIGGER_RIGHT
 from colorama import Fore, Style
 
 MODEL_USE = ""
@@ -29,6 +31,11 @@ def fix_think_content(history):
 	for entry in history:
 		if entry.get('role') in ['assistant', 'system'] and 'content' in entry:
 			entry['content'] = str(entry['content']).replace("\"think\"","<think>").replace("\"/think\"","</think>")
+			pattern = '{}(.*?){}.*'.format(TRIGGER_LEFT, TRIGGER_RIGHT)
+			match = re.search(pattern, entry['content'], re.DOTALL)
+			if match:
+				content_between_tags = match.group(1).strip()
+				entry['content'] = re.sub(pattern, content_between_tags, entry['content'], flags=re.DOTALL)
 	return history
 
 def create_convo(system_role, history, prompt, input_file, input_use_history, input_debug_log, input_remove_think, input_no_system_prompt): 
@@ -46,7 +53,7 @@ def create_convo(system_role, history, prompt, input_file, input_use_history, in
 		print("{}convo = {}{}".format(Fore.LIGHTGREEN_EX, convo, Style.RESET_ALL))
 	
 	return convo
-		 
+	 
 @spaces.GPU()
 @torch.no_grad()
 def generate_description(message: dict, history, system_role, input_use_history, input_temperature, input_top_k, input_top_p, input_repetition_penalty, input_max_new_tokens, input_debug_log, input_remove_think, input_no_system_prompt) -> Generator[str, None, None]:	
@@ -77,6 +84,18 @@ def generate_description(message: dict, history, system_role, input_use_history,
 			yield outputs				
 		
 	print("{}output_text = {}{}".format(Fore.LIGHTGREEN_EX, outputs, Style.RESET_ALL))
+ 
+	pose_tags = extract_comfyui_content(outputs.split("\"/think\"")[-1])
+	if pose_tags:
+		yield outputs+"\n\nWaiting for images..."
+		image_path = comfyui(pose_tags)		
+  
+		with open(image_path, 'rb') as f:
+			binary = f.read()
+		base64_encoded = base64.b64encode(binary).decode('utf-8')
+		print("{}image_path = {}{}".format(Fore.LIGHTGREEN_EX, image_path, Style.RESET_ALL))
+		#yield outputs + "\n\n" + "<p><img src="+ image_path +" alt='output_image'></p>"
+		yield outputs + "\n\n" + '<p><img src="data:image/png;base64,'+base64_encoded+'"></p>'
   
 	gc.collect()
 	torch.cuda.empty_cache()
@@ -156,5 +175,9 @@ if __name__ == "__main__":
   
 		gr.HTML(TITLE)
 
-  
-	demo.launch()
+	current_file_path = os.path.abspath(__file__)
+	current_folder = os.path.dirname(current_file_path) + '\\Outputs'
+	print("{}current_folder = {}{}".format(Fore.LIGHTGREEN_EX, current_folder, Style.RESET_ALL))
+	demo.launch(
+		
+	)
