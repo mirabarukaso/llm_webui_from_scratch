@@ -23,6 +23,7 @@ def remove_think_content(history):
 	new_history = []
 	for entry in history:
 		if entry.get('role') in ['assistant', 'system'] and 'content' in entry:
+			entry['content'] = entry['content'].split("<p>")[0]
 			entry['content'] = entry['content'].split("</think>")[-1]
 		new_history.append(entry)
 	return new_history
@@ -30,12 +31,8 @@ def remove_think_content(history):
 def fix_think_content(history):
 	for entry in history:
 		if entry.get('role') in ['assistant', 'system'] and 'content' in entry:
-			entry['content'] = str(entry['content']).replace("\"think\"","<think>").replace("\"/think\"","</think>")
-			pattern = '{}(.*?){}.*'.format(TRIGGER_LEFT, TRIGGER_RIGHT)
-			match = re.search(pattern, entry['content'], re.DOTALL)
-			if match:
-				content_between_tags = match.group(1).strip()
-				entry['content'] = re.sub(pattern, content_between_tags, entry['content'], flags=re.DOTALL)
+			entry['content'] = entry['content'].split("<p>")[0]
+			entry['content'] = entry['content'].replace("\"think\"","<think>").replace("\"/think\"","</think>")			
 	return history
 
 def create_convo(system_role, history, prompt, input_file, input_use_history, input_debug_log, input_remove_think, input_no_system_prompt): 
