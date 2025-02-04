@@ -69,9 +69,8 @@ py -m pip install "git+https://github.com/abetlen/llama-cpp-python.git" --force-
 (Optional: Re-install numpy 1.26.4, you hve numpy-2.2.1 now. Solve:numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, got 88 from PyObject)
 py -m pip install numpy==1.26.4
 
-(Now you can goto #11 to perform a quick test)
 ```
-10. Now let's do a quick test, both "Failed" and "Success" are valid results.
+10. Quick test, both "Failed" and "Success" are valid results.
 ```
 cd ..
 cd Scripts
