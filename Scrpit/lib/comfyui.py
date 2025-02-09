@@ -11,7 +11,7 @@ import re
 
 ws = None
 
-TRIGGER_LEFT = "CSTART"
+TRIGGER_LEFT = "CSTART "
 TRIGGER_RIGHT = "CEND"
 
 class ComfyUIAPIGenerator:

@@ -3,9 +3,12 @@ import os
 import base64
 from PIL import Image
 from io import BytesIO
+from transformers import StoppingCriteria
+import argparse
+import mimetypes
 
-MODEL_PATH_TEMPLATE = '..\\{}\\{}'
-GGUF_PATH_TEMPLATE = '..\\{}\\{}\\{}'
+MODEL_PATH_TEMPLATE 	= '..\\{}\\{}'
+GGUF_PATH_TEMPLATE 		= '..\\{}\\{}\\{}'
 
 MAX_IMAGE_SIZE = 640
 
@@ -32,16 +35,36 @@ def check_vision_support(model_path, vision_keyword="-vision-"):
 		print("{}INFO: This is Vision model{}".format(Fore.LIGHTMAGENTA_EX, Style.RESET_ALL))
 		return True
 
+def process_files(files, vision_model, input_image_size = 0):
+	images = ''	
+	file_prompt = ''
+	if len(files) > 0:
+		if not vision_model:
+			file_prompt = read_files(files)
+		else:
+			image_list = []
+			file_list = []
+			for file in files:
+				mime_type, _ = mimetypes.guess_type(file)
+				if mime_type and mime_type.startswith('image'):
+					image_list.append(file)
+				else:
+					file_list.append(file)
+	
+			images = load_images(image_list, input_image_size) 
+			file_prompt = read_files(file_list)
+	return images, file_prompt
+
+def read_files(files):
+    content = ''
+    for file in files:
+        content += f'{read_file_content_to_prompt(file)}\n'
+    return content
+
 def read_file_content_to_prompt(file_path):
 	with open(file_path, 'r', encoding='utf-8') as file:
 		file_content = file.read()
 	return file_content
-  
-def append_file_content_to_prompt(file_path, prompt):
-	with open(file_path, 'r', encoding='utf-8') as file:
-		file_content = file.read()
-	prompt = file_content + prompt
-	return prompt
 
 def image_to_base64(image):
 	buffered = BytesIO()
@@ -84,7 +107,13 @@ def load_images(images, size = MAX_IMAGE_SIZE):
   
 	return resize_images(image_list, size)
 
-import argparse
+# Stopping criteria for cancel the generation process
+class MyStopCriteria(StoppingCriteria):
+	def __init__(self, event):
+		self.event = event
+  
+	def __call__(self, *args, **kwargs):
+		return self.event.is_set()					  	
 
 def parse_arguments(path_prefix):
 	parser = argparse.ArgumentParser(description="Parse command line arguments.")

@@ -1,39 +1,62 @@
-from enum import Enum
-from llama_cpp import Llama, LLAMA_DEFAULT_SEED
-from PIL import Image
+from llama_cpp import Llama, StoppingCriteriaList
 from colorama import Fore, Style
-from .basic import GGUF_PATH_TEMPLATE, MAX_IMAGE_SIZE, read_file_content_to_prompt, append_file_content_to_prompt, resize_image, image_to_base64
+from .basic import GGUF_PATH_TEMPLATE, read_file_content_to_prompt
 import asyncio
 import os
 import mimetypes
+import tempfile
+'''
+from PIL import Image
+from io import BytesIO
+import random
+import sys
+import base64
+'''
 
-class ggml_numa_strategy(Enum):
-	GGML_NUMA_STRATEGY_DISABLED   = 0
-	GGML_NUMA_STRATEGY_DISTRIBUTE = 1
-	GGML_NUMA_STRATEGY_ISOLATE    = 2
-	GGML_NUMA_STRATEGY_NUMACTL    = 3
-	GGML_NUMA_STRATEGY_MIRROR     = 4
+GGUF_PATH_TEMPLATE 	= '..\\{}\\{}\\{}'
 
-    
-GGUF_PATH_TEMPLATE = '..\\{}\\{}\\{}'
-HISTORY_REPLACE_MARK = '__REPLACE_BY_REAL_HISTORY__'
-DEFAULT_SEED = LLAMA_DEFAULT_SEED
+TEMPLATE_SYSTEM 	= 0
+TEMPLATE_USER 		= 1
+TEMPLATE_ASSISTANT 	= 2
+TEMPLATE_REPLY	 	= 3
+TEMPLATE_DEEPSEEK	= ['<｜User｜>{}\n', '<｜User｜>{}\n', '<｜Assistant｜>{}', '<｜Assistant｜>']	#The template example gives out the full-width characters....
+TEMPLATE_QWEN2	 	= ['<|im_start|>system\n{}<|im_end|>\n','<|im_start|>user\n{}<|im_end|>\n','<|im_start|>assistant\n{}<|im_end|>\n', '<|im_start|>assistant']
+TEMPLATE_LLAMA3 	= ['<|start_header_id|>system<|end_header_id|>{}<|eot_id|>\n','<|start_header_id|>user<|end_header_id|>{}<|eot_id|>\n','<|start_header_id|>assistant<|end_header_id|>{}<|eot_id|>\n', '<|start_header_id|>assistant<|end_header_id|>']
+TEMPLATE_OPENBUDDY	= ['<|role|>system<|says|>{}<|end|>\n','<|role|>user<|says|>{}<|end|>\n','<|role|>assistant<|says|>{}<|end|>\n', '<|role|>assistant<|says|>']
+TEMPLATE_AYA_EXP	= ['<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>{}<|END_OF_TURN_TOKEN|>\n','<|START_OF_TURN_TOKEN|><|USER_TOKEN|>{}<|END_OF_TURN_TOKEN|>\n','<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>{}<|END_OF_TURN_TOKEN|>\n', '<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>']
+TEMPLATE_DEFAULT 	= TEMPLATE_LLAMA3
 
+IMG_BASE64_TAG	 	= 'data:image/png;base64,{}'
+IMG_FILE_TAG	 	= 'file:///{}'
+
+def get_file_extension(file_path):
+    _, file_extension = os.path.splitext(file_path)
+    return file_extension
+'''
+def image_to_base64_data_uri(file_path):
+    with open(file_path, "rb") as img_file:
+        base64_data = base64.b64encode(img_file.read()).decode('utf-8')
+        return IMG_BASE64_TAG.format(base64_data)
+'''
 class llama_gguf:
 	cancel_event = None
 	model = None
 	
 	def __init__(self):
 		self.cancel_event = asyncio.Event()
-	
-	# Stopping criteria for cancel the generation process
-	class StopCriteria():
-		def __init__(self, event):
-			self.event = event
-
-		def __call__(self, *args, **kwargs):
-			return self.event.is_set() 
-	
+		self.stopping_criteria = StoppingCriteriaList([
+			self.custom_stopping_criteria(self.cancel_event)
+		])  
+		self.chat_template = TEMPLATE_DEFAULT
+  
+		with tempfile.TemporaryDirectory() as self.tmpdirname:
+			print('{}Created temporary directory:{}{}'.format(Fore.LIGHTCYAN_EX, self.tmpdirname, Style.RESET_ALL))
+  
+	def custom_stopping_criteria(self, local_llm_stop_event):
+		def f(input_ids, score, **kwargs) -> bool:
+				return local_llm_stop_event.is_set()
+		return f
+  
 	def load_model(self, prefix, model_name, n_threads=16, n_threads_batch=16, n_gpu_layers=45, n_ctx = 8192, verbose = False, lora_path = None, lora_scale=1.0, use_mmap = False, use_mlock = False):
 		# Load the model and processor and tokenizer
 		if str(model_name).startswith("GGUF_"):
@@ -43,69 +66,38 @@ class llama_gguf:
 				Fore.LIGHTGREEN_EX, gguf_full_filename, n_threads, n_threads_batch, n_gpu_layers, n_ctx, verbose, Style.RESET_ALL))
 			if lora_path:
 				print("{}Loading LORA: {} | Lora Scale: {}|{}".format(Fore.LIGHTRED_EX, lora_path, lora_scale, Style.RESET_ALL))
-				#self.model = Llama(gguf_full_filename, n_threads=n_threads, n_threads_batch=n_threads_batch, n_gpu_layers=n_gpu_layers, verbose = verbose, n_ctx=n_ctx, lora_path=lora_path, lora_scale=lora_scale, use_mmap=False)  
-			#else:
-			self.model = Llama(gguf_full_filename, n_threads=n_threads, n_threads_batch=n_threads_batch, n_gpu_layers=n_gpu_layers, verbose = verbose, n_ctx=n_ctx, lora_path=lora_path, lora_scale=lora_scale, use_mmap=use_mmap, use_mlock=use_mlock)  
+			
+			self.model = Llama(model_path=gguf_full_filename, n_threads=n_threads, n_threads_batch=n_threads_batch, n_gpu_layers=n_gpu_layers, 
+							verbose = verbose, n_ctx=n_ctx, lora_path=lora_path, lora_scale=lora_scale, use_mmap=use_mmap, use_mlock=use_mlock, flash_attn=True, seed=-1,
+						)
+   
+			if str(gguf_filename).lower().__contains__('deepseek'):
+				self.chat_template = TEMPLATE_DEEPSEEK
+			elif str(gguf_filename).lower().__contains__('llama'):
+				self.chat_template = TEMPLATE_LLAMA3
+			elif str(gguf_filename).lower().__contains__('qwen'):
+				self.chat_template = TEMPLATE_QWEN2
+			elif str(gguf_filename).lower().__contains__('openbuddy'):
+				self.chat_template = TEMPLATE_OPENBUDDY
+			elif str(gguf_filename).lower().__contains__('aya-expanse'):
+				self.chat_template = TEMPLATE_AYA_EXP		
+			else:
+				self.chat_template = TEMPLATE_DEFAULT
 		else:
 			error_message = "Error: Unsupported model type."
 			raise RuntimeError("{}{}{}".format(Fore.LIGHTRED_EX, error_message, Style.RESET_ALL))
 
-	def process_history(self, history, combine_mode=False):
-		convo = []
-		if combine_mode:
-			convo = self._process_combined_history(history)
-		else:
-			convo = self._process_separate_history(history)
-		self._clean_history_marks(convo)
-		return convo
-
-	def _process_combined_history(self, history):
-		convo = []
-		for entry in history:
-			human_content, system_content = self._extract_contents(entry)
-			self._append_human_content(convo, human_content)
-			self._append_system_content(convo, system_content)
-		return convo
-
-	def _process_separate_history(self, history):
+	def process_history_for_create_completion(self, history):
 		convo = []
 		for entry in history:
 			human_content = entry['content'] if entry['role'] == 'user' else ''
 			human_content = self.process_input_messages(human_content)
-			system_content = entry['content'] if entry['role'] == 'assistant' else ''
+			assistant_content = entry['content'] if entry['role'] == 'assistant' else ''
 			if human_content:
-				convo.append({"role": "user", "content": human_content + "\n"})
-			if system_content:
-				convo.append({"role": "assistant", "content": system_content + "\n"})
+				convo.append(self.chat_template[TEMPLATE_USER].format(human_content))
+			if assistant_content:
+				convo.append(self.chat_template[TEMPLATE_ASSISTANT].format(assistant_content))
 		return convo
-
-	def _extract_contents(self, entry):
-		human_content = ''
-		system_content = ''
-		if entry['role'] == 'user':
-			human_content = self.process_input_messages(entry['content'])
-		if entry['role'] == 'assistant':
-			system_content = entry['content']
-		return human_content, system_content
-
-	def _append_human_content(self, convo, human_content):
-		if human_content:
-			skip_append = False
-			for i, conv in enumerate(convo):
-				if conv['role'] == 'user' and HISTORY_REPLACE_MARK in conv['content']:
-					convo[i]['content'] = conv['content'].replace(HISTORY_REPLACE_MARK, human_content)
-					skip_append = True
-					break
-			if not skip_append:
-				convo.append({"role": "user", "content": human_content + "\n"})
-
-	def _append_system_content(self, convo, system_content):
-		if system_content:
-			convo.append({"role": "system", "content": system_content + "\n"})
-
-	def _clean_history_marks(self, convo):
-		for i, conv in enumerate(convo):
-			convo[i]['content'] = conv['content'].replace(HISTORY_REPLACE_MARK, '')
 	
 	def process_input_messages(self, content):
 		if isinstance(content, tuple) and len(content) == 1:
@@ -113,79 +105,110 @@ class llama_gguf:
 			if os.path.isfile(file_path):
 				with open(file_path, 'r', encoding='utf-8') as file:
 					file_content = file.read()
-				return file_content + HISTORY_REPLACE_MARK
+				return file_content
 		return content
 
-	def create_convo(self, system_role, history, prompt, use_history, file_data=None, file_type=None, combine_mode=False, no_system_prompt=False, use_history_back=False):
+	def create_convo_for_create_completion(self, system_role, history, prompt, use_history, file_list, no_system_prompt):
 		convo = []
   
 		if not no_system_prompt:
-			convo.append({'role': 'system', 'content': system_role + "\n"})
+			convo.append(self.chat_template[TEMPLATE_SYSTEM].format(system_role))
    
 		if len(history) > 0 and use_history:
-			convo.extend(self.process_history(history, combine_mode))
+			convo.extend(self.process_history_for_create_completion(history))
+
+		if file_list:
+			prefix_data = ''
+			for file_data, file_type in file_list:
+				if file_type == 'text' or file_type == 'json':
+					prefix_data += file_data
+				elif file_type == 'image':
+					#BUG: NOT SUPPORT!!!
+					pass
+			
+			if prompt:
+				convo.append(self.chat_template[TEMPLATE_USER].format(f'{prefix_data}\n{prompt}'))
+		else:			
+			convo.append(self.chat_template[TEMPLATE_USER].format(prompt))
+		
+		convo.append(self.chat_template[TEMPLATE_REPLY])
+		return ''.join(convo)
+
+	def create_convo(self, system_role, history, prompt, use_history=False, file_list=None, no_system_prompt=False):		
+		return self.create_convo_for_create_completion(system_role, history, prompt, use_history, file_list, no_system_prompt)
+
+
+	def do_chat_ex(self, convo, input_temperature = 0.8, input_top_k = 40, input_top_p = 0.95, input_repetition_penalty = 1.1, input_max_new_tokens = 2048, stop = None):	   
+		return self.model.create_completion(
+			prompt=convo,
+			stream=True,
+			temperature=input_temperature,
+			top_k=input_top_k,
+			top_p=input_top_p,
+			repeat_penalty=input_repetition_penalty,
+			max_tokens=input_max_new_tokens,
+			stopping_criteria=self.stopping_criteria,
+   			stop=stop if stop else self.model.token_eos()
+		)
+
+	def do_chat(self, convo, input_temperature = 0.8, input_top_k = 40, input_top_p = 0.95, input_repetition_penalty = 1.1, input_max_new_tokens = 2048, stop = None, input_debug_log = False):
+		if input_debug_log:
+			print("{}convo = {}{}".format(Fore.LIGHTGREEN_EX, convo, Style.RESET_ALL))
    
-		if file_data:
-			if file_type == 'text' or file_type == 'json':
-				convo.append({"role": "user", "content": file_data + prompt + "\n"})
-			elif file_type == 'image':
-				convo.append({"role": "user", "content": [
-						{"type": "image_url", "image_url": {"url": file_data}},
-						{"type" : "text", "text": prompt + "\n"}
-                	] 
-                  })
-		else:
-			convo.append({"role": "user", "content": prompt + "\n"})
-   
-		if len(history) > 0 and use_history_back and use_history:
-			convo = convo[::-1]
+		outputs = ""
+		streamer = self.do_chat_ex(convo, input_temperature, input_top_k, input_top_p, input_repetition_penalty, input_max_new_tokens, stop)
+		for msg in streamer:
+			message = msg['choices'][0]
+			if 'text' in message:
+				new_token = message['text']
+				if new_token != "<":
+					outputs += new_token
+					yield outputs
+     
+		if input_debug_log:
+			print("{}output_text = {}{}".format(Fore.LIGHTRED_EX, outputs, Style.RESET_ALL))
 
-		return convo
+	def process_files(self, files, input_image_size):
+		files_list =[]
+		for file in files:
+			file_content, file_fype = self.process_file(file, input_image_size)
+			files_list.append([file_content, file_fype])
+		return files_list
 
-	def do_chat(self, convo, input_temperature = 0.8, input_top_k = 40, input_top_p = 0.95, input_repetition_penalty = 1.1, input_max_new_tokens = 2048, stop = None):
-		streamer = None
-  	
-		if not stop:  
-			streamer = self.model.create_chat_completion(
-				convo, 
-				stream=True,
-				temperature=input_temperature,
-				top_k=input_top_k,
-				top_p=input_top_p,
-				repeat_penalty=input_repetition_penalty,
-				max_tokens=input_max_new_tokens,
-			)
-		else:
-			streamer = self.model.create_chat_completion(
-				convo, 
-				stream=True,
-				temperature=input_temperature,
-				top_k=input_top_k,
-				top_p=input_top_p,
-				repeat_penalty=input_repetition_penalty,
-				max_tokens=input_max_new_tokens,
-				stop=stop,
-			)
-								
-		return streamer
-
-	def process_file(self, file_path):
+	def process_file(self, file_path, input_image_size):
 		if not file_path:
 			return None, 'None'
 
 		mime_type, _ = mimetypes.guess_type(file_path)
 		if mime_type:
-			if mime_type.startswith('text') or mime_type == 'application/json':
+			if mime_type == 'text/plain':
 				file_content = read_file_content_to_prompt(file_path)	
 				return file_content, 'text'
-			elif mime_type.startswith('image'):
-				image = Image.open(file_path)
-				resized_image = resize_image(image, MAX_IMAGE_SIZE)
-				# TODO: This is not a good idea use base64 for image input, too much tokens
-				image_base64 = image_to_base64(resized_image)
-				return image_base64, 'image'
-			else:
-				raise ValueError("Unsupported file type")
+			elif mime_type == 'application/json':
+				file_content = read_file_content_to_prompt(file_path)	
+				return file_content, 'json'
+			elif mime_type.startswith('image') and input_image_size > 0:
+				pass
+				'''
+				#NOT SUPPORT!!!
+				file_extension = get_file_extension(file_path)
+				image = Image.open(file_path)				
+				resized_image = resize_image(image, input_image_size)
+
+				image_bytes = BytesIO()
+				resized_image.save(image_bytes, format=image.format)
+				image_bytes = image_bytes.getvalue()
+				random_integer = random.randint(0, sys.maxsize)
+    
+				image_path = '{}{}{}'.format(self.tmpdirname, random_integer, file_extension)
+				with open(image_path, 'wb') as f:
+					f.write(image_bytes)
+				print(f'Saved image to {image_path}')    
+    
+				return image_to_base64_data_uri(file_path), 'image'
+				#return IMG_FILE_TAG.format(file_path), 'image'
+				'''
 		else:
-			raise ValueError("Could not determine the file type")
+			print("{}Error: Could not determine the file type{}".format(Fore.LIGHTRED_EX, Style.RESET_ALL))
+			return None, 'None'
 		

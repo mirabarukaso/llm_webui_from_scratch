@@ -9,7 +9,7 @@ from typing import Generator
 import asyncio
 import gc
 import os
-from lib.basic import parse_arguments, check_vision_support, LATEX_DELIMITERS_SET, SYSTEM_ROLE, MODEL_PATH_TEMPLATE
+from lib.basic import parse_arguments, check_vision_support, LATEX_DELIMITERS_SET, SYSTEM_ROLE, MODEL_PATH_TEMPLATE, process_files
 from colorama import Fore, Style
 
 MAX_IMAGE_SIZE = 640
@@ -35,8 +35,6 @@ class StopCriteria(StoppingCriteria):
 		return self.event.is_set() 
 
 def load_model(prefix, model_path):
-	global cancel_event
- 
 	full_path = MODEL_PATH_TEMPLATE.format(prefix, model_path)
 	print("{}Loading: {}{}".format(Fore.LIGHTGREEN_EX, full_path, Style.RESET_ALL))
 
@@ -44,50 +42,47 @@ def load_model(prefix, model_path):
 	model.to('cuda')
 	tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH_TEMPLATE.format(PATH_PREFIX, model_path))
   
-	cancel_event = asyncio.Event()
 	return model, tokenizer
 
-def create_convo(system_role, history, prompt, input_file, input_use_history, input_debug_log): 
+def create_convo(system_role, history, prompt, files, input_use_history): 
 	convo = [] 
  
 	if not using_gguf_model:
-		convo = create_convo_local(system_role, history, prompt, input_use_history)
+		convo = create_convo_local(system_role, history, prompt, files, input_use_history)
 	else:
-		file_date, file_type=gguf.process_file(input_file)
-		convo = gguf.create_convo(system_role, history, prompt, input_use_history, file_date, file_type, combine_mode=True)
-	
-	if input_debug_log:
-		print("{}convo = {}{}".format(Fore.LIGHTGREEN_EX, convo, Style.RESET_ALL))
-	
+		files_list=gguf.process_files(files, 0)
+		convo = gguf.create_convo(system_role, history, prompt, use_history=input_use_history, file_list=files_list)
+		
 	return convo
 
-def create_convo_local(system_role, history, prompt, input_use_history):
+def create_convo_local(system_role, history, prompt, files, input_use_history):
+	_, file_prompt = process_files(files, vision_model=False, input_image_size=0)
+    
 	convo = [{'role': 'system', 'content': system_role}]
 	if len(history) > 0 and input_use_history:
 		convo.extend(history)
-	convo.append({'role': 'user', 'content': prompt,})
+	convo.append({'role': 'user', "content": f'{file_prompt}\n{prompt}'})
 	return convo
 
-def do_chat(messages): 
-	global cancel_event
+def do_chat(messages, input_debug_log=False): 
 	global start_time
  
 	# Preparation for inference
-	input_ids = tokenizer.apply_chat_template(
+	text = tokenizer.apply_chat_template(
 	 	messages, tokenize=False, add_generation_prompt=True
 	 )
-	inputs = tokenizer(input_ids, return_tensors="pt")
+	inputs = tokenizer(text, return_tensors="pt")
 	inputs=inputs.to(model.device)
 
-	streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+	if input_debug_log:
+		print("{}convo = {}{}".format(Fore.LIGHTGREEN_EX, text, Style.RESET_ALL))    
 
+	streamer = TextIteratorStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
 	generation_kwargs = dict(
 		**inputs,
 		streamer=streamer,
 	)
- 
-	# Clear the event
-	cancel_event.clear() 
+
 	# Add stopping criteria
 	generation_kwargs['stopping_criteria'] = [StopCriteria(cancel_event)]
 			
@@ -96,9 +91,12 @@ def do_chat(messages):
 
 	thread = Thread(target=model.generate, kwargs=generation_kwargs)
 	thread.start()
+	outputs = ''
 	for new_text in streamer:
-		yield new_text
+		outputs +=new_text
+		yield outputs
 
+	print("{}output_text = {}{}".format(Fore.LIGHTGREEN_EX, outputs, Style.RESET_ALL))
 	# Wait for the thread to finish
 	thread.join()
 	print("{}Time used: {} seconds{}".format(Fore.LIGHTGREEN_EX, time.time() - start_time, Style.RESET_ALL))
@@ -120,38 +118,20 @@ def generate_description(message: dict, history, btn_cancel, system_role, input_
 
 	prompt = message['text'].strip()	
  
-	# Create conversation
-	input_file = None
-	if len(message["files"]) > 0:
-		input_file = message["files"][0]
-	convo = create_convo(system_role, history, prompt, input_file, input_use_history, input_debug_log) 
- 
+	convo = create_convo(system_role, history, prompt, message["files"], input_use_history)
+	cancel_event.clear()	
 	if not using_gguf_model:
-		# Generate response
-		response = do_chat(convo)
-
-		outputs = []
-		for new_text in response:
-			outputs.append(new_text)
-			yield "".join(outputs)
+		yield from do_chat(convo, input_debug_log=input_debug_log)
 	else:
-		streamer = gguf.do_chat(
-      			convo=convo,
-         		input_temperature=input_temperature, 
-           		input_top_k=input_top_k, 
-             	input_top_p=input_top_p, 
-              	input_repetition_penalty=input_repetition_penalty, 
-               	input_max_new_tokens=input_max_new_tokens,
-            )	
-		
-		outputs = ""
-		for msg in streamer:
-			message = msg['choices'][0]['delta']
-			if 'content' in message:
-				outputs += message['content']
-				yield outputs		
-
-	print("{}output_text = {}{}".format(Fore.LIGHTGREEN_EX, outputs, Style.RESET_ALL))
+		yield from gguf.do_chat(
+			convo=convo,
+			input_temperature=input_temperature,
+			input_top_k=input_top_k,
+			input_top_p=input_top_p,
+			input_repetition_penalty=input_repetition_penalty,
+			input_max_new_tokens=input_max_new_tokens,
+			input_debug_log=input_debug_log,
+		)
   
 	gc.collect()
 	torch.cuda.empty_cache()
@@ -169,8 +149,10 @@ if __name__ == "__main__":
   
 	if using_gguf_model:
 		gguf.load_model(prefix=PATH_PREFIX, model_name=MODEL_USE, n_threads=N_THREADS, n_threads_batch=N_THREADS_BATCH, n_gpu_layers=N_GPU_LAYERS, n_ctx=N_CTX, verbose=VERBOSE, lora_path=LORA_PATH, lora_scale=LORA_SCALE, use_mmap=MMAP, use_mlock=MLOCK)
+		cancel_event = gguf.cancel_event
 	else:
 		model, tokenizer = load_model(PATH_PREFIX, MODEL_USE)
+		cancel_event = asyncio.Event()
  
 	avatars_list = ['.\\Images\\avatar_user.png', '.\\Images\\avatar_system.png']
 	chatbot=gr.Chatbot(

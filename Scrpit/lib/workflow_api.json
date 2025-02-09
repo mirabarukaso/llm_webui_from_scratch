@@ -172,7 +172,7 @@
   },
   "11": {
     "inputs": {
-      "ckpt_name": "waiNSFWIllustrious_v90.safetensors"
+      "ckpt_name": "waiNSFWIllustrious_v10.safetensors"
     },
     "class_type": "Checkpoint Loader with Name (Image Saver)",
     "_meta": {

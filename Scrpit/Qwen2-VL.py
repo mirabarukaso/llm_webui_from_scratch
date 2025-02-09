@@ -4,15 +4,16 @@ import time
 import spaces
 import torch
 import gradio as gr
-from transformers import Qwen2VLForConditionalGeneration, GenerationConfig, AutoProcessor, TextIteratorStreamer, StoppingCriteria, AutoTokenizer
+from transformers import Qwen2VLForConditionalGeneration, GenerationConfig, AutoProcessor, TextIteratorStreamer
 from qwen_vl_utils import process_vision_info
 from PIL import Image
 from typing import Generator
 import asyncio
 import gc
 import os
-from lib.basic import check_vision_support, append_file_content_to_prompt, parse_arguments, LATEX_DELIMITERS_SET, SYSTEM_ROLE, MODEL_PATH_TEMPLATE
+from lib.basic import check_vision_support, parse_arguments, LATEX_DELIMITERS_SET, SYSTEM_ROLE, MODEL_PATH_TEMPLATE, MyStopCriteria, process_files
 from colorama import Fore, Style
+import mimetypes
 
 MAX_IMAGE_SIZE = 640
 MODEL_USE = ""
@@ -29,17 +30,7 @@ start_time = 0
 
 gguf = llama_gguf()
 
-# Stopping criteria for cancel the generation process
-class StopCriteria(StoppingCriteria):
-	def __init__(self, event):
-		self.event = event
-
-	def __call__(self, *args, **kwargs):
-		return self.event.is_set() 
-
 def load_model(prefix, model_path):
-	global cancel_event
-	
 	full_path = MODEL_PATH_TEMPLATE.format(prefix, model_path)
 	print("{}Loading: {}{}".format(Fore.LIGHTGREEN_EX, full_path, Style.RESET_ALL))
 
@@ -49,8 +40,7 @@ def load_model(prefix, model_path):
 	min_pixels = 128 * 28 * 28
 	max_pixels = 1280 * 28 * 28
 	processor = AutoProcessor.from_pretrained(full_path, min_pixels=min_pixels, max_pixels=max_pixels)
- 
-	cancel_event = asyncio.Event()
+	
 	return model, processor
 
 def resize_image(image, max_size=384):
@@ -88,28 +78,26 @@ def load_images(images, size = MAX_IMAGE_SIZE):
   
 	return resize_images(image_list, size)
 
-def create_convo(system_role, history, prompt, images, input_use_history, input_debug_log): 
+def create_convo(system_role, history, prompt, files, input_use_history, input_image_size): 
 	convo = []
- 
+  
 	if not using_gguf_model:
-		convo = create_non_gguf_convo(system_role, history, prompt, images, input_use_history)
+		convo = create_convo_local(system_role, history, prompt, files, input_use_history, input_image_size)
 	else:
-		file_date, file_type=gguf.process_file(images)
-		convo = gguf.create_convo(system_role, history, prompt, input_use_history, file_date, file_type)
-	
-	if input_debug_log:
-		print("{}convo = {}{}".format(Fore.LIGHTGREEN_EX, convo, Style.RESET_ALL))
+		files_list=gguf.process_files(files, input_image_size)
+		convo = gguf.create_convo(system_role, history, prompt, use_history=input_use_history, file_list=files_list)
 	
 	return convo
 
-def create_non_gguf_convo(system_role, history, prompt, images, input_use_history): 
+def create_convo_local(system_role, history, prompt, files, input_use_history, input_image_size):     
+	images, file_prompt = process_files(files, vision_model=vision_model, input_image_size=input_image_size)
+     
 	# assistant
 	convo = [
 			{'role': 'system', 'content': system_role},
 		]
     
 	if len(history) > 0 and input_use_history:
-  
 		for entry in history:
 			if entry['role'] == 'user':
 				user_contents = entry['content']
@@ -124,7 +112,7 @@ def create_non_gguf_convo(system_role, history, prompt, images, input_use_histor
 		convo.append(
 			{
 				"role": "user",
-				"content": [{"type": "text", "text": prompt}],
+				"content": f'{file_prompt}\n{prompt}',
 			}
 		)
 	else:
@@ -133,21 +121,23 @@ def create_non_gguf_convo(system_role, history, prompt, images, input_use_histor
 				"role": "user",
 				"content": [
 					{"type": "image", "image": image} for image in images
-				] + [{"type": "text", "text": prompt}],
+				] + [{"type": "text", "text": file_prompt + prompt}],
 			}
 		)
 	
 	return convo
 
-def do_chat(messages): 
-	global cancel_event
+def do_chat(messages, input_debug_log=False): 
 	global start_time
-    
+ 	
 	# Preparation for inference
 	text = processor.apply_chat_template(
 		messages, tokenize=False, add_generation_prompt=True
 	)
 	image_inputs, video_inputs = process_vision_info(messages)
+ 
+	if input_debug_log:
+		print("{}convo = {}{}".format(Fore.LIGHTGREEN_EX, text, Style.RESET_ALL))    
 
 	inputs = processor(
 		text=[text],
@@ -164,19 +154,21 @@ def do_chat(messages):
 		streamer=streamer,
 		)
 
-	# Clear the event
-	cancel_event.clear() 
 	# Add stopping criteria
-	generation_kwargs['stopping_criteria'] = [StopCriteria(cancel_event)]
+	generation_kwargs['stopping_criteria'] = [MyStopCriteria(cancel_event)]
 			
 	# Time counter
 	start_time = time.time()
 
 	thread = Thread(target=model.generate, kwargs=generation_kwargs)
 	thread.start()
-	for new_text in streamer:
-		yield new_text
 
+	outputs = ''
+	for new_text in streamer:
+		outputs +=new_text
+		yield outputs
+
+	print("{}output_text = {}{}".format(Fore.LIGHTGREEN_EX, outputs, Style.RESET_ALL))
 	# Wait for the thread to finish
 	thread.join()
 	print("{}Time used: {} seconds{}".format(Fore.LIGHTGREEN_EX, time.time() - start_time, Style.RESET_ALL))
@@ -193,45 +185,27 @@ def generate_description(message: dict, history, btn_cancel, system_role, input_
 	prompt = message['text'].strip()
 	if input_debug_log:
 		print("{}prompt = {}{}".format(Fore.LIGHTGREEN_EX, prompt, Style.RESET_ALL))
-
-	if not vision_model:
-		images = None
-  
-		if len(message["files"]) > 0:
-			images = message["files"][0]
-	else:
-		# Load and Resize images
-		images = load_images(message["files"], input_image_size) 
  
 	# Create conversation
-	convo = create_convo(system_role, history, prompt, images, input_use_history, input_debug_log)
+	convo = create_convo(system_role, history, prompt, message["files"], input_use_history, input_image_size)
 
+	cancel_event.clear()
 	if not using_gguf_model:
-		# Generate response
-		response = do_chat(convo)
-
-		outputs = []
-		for new_text in response:
-			outputs.append(new_text)
-			yield "".join(outputs)
+		yield from do_chat(convo, input_debug_log=input_debug_log)
 	else:
-		streamer = gguf.do_chat(
-	  			convo=convo,
-		 		input_temperature=input_temperature, 
-		   		input_top_k=input_top_k, 
-			 	input_top_p=input_top_p, 
-			  	input_repetition_penalty=input_repetition_penalty, 
-			   	input_max_new_tokens=input_max_new_tokens,
-				)	
-	
-		outputs = ""
-		for msg in streamer:
-			message = msg['choices'][0]['delta']
-			if 'content' in message:
-				outputs += message['content']
-				yield outputs	
-
-	print("{}output_text = {}{}".format(Fore.LIGHTGREEN_EX, outputs, Style.RESET_ALL))
+		#image_inputs, video_inputs = process_vision_info(convo)
+		#print('image_inputs={}'.format(image_inputs))
+		#print('video_inputs={}'.format(video_inputs))
+  ##TODO:BUG HERE
+		yield from gguf.do_chat(
+			convo=convo,
+			input_temperature=input_temperature,
+			input_top_k=input_top_k,
+			input_top_p=input_top_p,
+			input_repetition_penalty=input_repetition_penalty,
+			input_max_new_tokens=input_max_new_tokens,
+			input_debug_log=input_debug_log,
+		)	
   
 	gc.collect()
 	torch.cuda.empty_cache()
@@ -242,16 +216,18 @@ def cancel_btn():
 		cancel_event.set()	
 		print("{}Time used: {} seconds{}".format(Fore.LIGHTGREEN_EX, time.time() - start_time, Style.RESET_ALL))
  
-
 if __name__ == "__main__":    
 	PATH_TEMPLATE = os.path.splitext(os.path.basename(__file__))[0]
 	PATH_PREFIX, MODEL_USE, N_THREADS, N_THREADS_BATCH, N_GPU_LAYERS, N_CTX, VERBOSE, using_gguf_model, FINETUNE_PATH, LORA_PATH, LORA_SCALE, MMAP, MLOCK, TITLE = parse_arguments(PATH_TEMPLATE)
 	vision_model = check_vision_support(MODEL_USE, '-VL-')
  
 	if using_gguf_model:
+		vision_model = False
 		gguf.load_model(prefix=PATH_PREFIX, model_name=MODEL_USE, n_threads=N_THREADS, n_threads_batch=N_THREADS_BATCH, n_gpu_layers=N_GPU_LAYERS, n_ctx=N_CTX, verbose=VERBOSE, lora_path=LORA_PATH, lora_scale=LORA_SCALE, use_mmap=MMAP, use_mlock=MLOCK)
+		cancel_event = gguf.cancel_event
 	else:
 		model, processor = load_model(PATH_PREFIX, MODEL_USE)
+		cancel_event = asyncio.Event()
  
 	avatars_list = ['.\\Images\\avatar_user.png', '.\\Images\\avatar_system.png']
 	chatbot=gr.Chatbot(
@@ -268,7 +244,7 @@ if __name__ == "__main__":
 	if not vision_model:
 		textbox = gr.MultimodalTextbox(file_types=["text", ".json"], file_count="single", max_lines=200)
 	else:
-		textbox = gr.MultimodalTextbox(file_types=["image"], file_count="multiple", max_lines=200)
+		textbox = gr.MultimodalTextbox(file_types=["image", "text", ".json"], file_count="multiple", max_lines=200)
     	
 	with gr.Blocks() as demo:		
 		btn_cancel = gr.Button(value="Cancel", render=False)

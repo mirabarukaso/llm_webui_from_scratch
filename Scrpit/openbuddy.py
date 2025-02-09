@@ -9,44 +9,39 @@ from lib.basic import LATEX_DELIMITERS_SET, SYSTEM_ROLE
 from colorama import Fore, Style
 
 cancel_event = None
-
 gguf = llama_gguf()
 
-def generate_description(message: dict, history, system_role, input_use_history, input_temperature, input_top_k, input_top_p, input_repetition_penalty, input_max_new_tokens, input_show_prompt) -> Generator[str, None, None]:
+def generate_description(message: dict, history, btn_cancel, system_role, input_use_history, input_temperature, input_top_k, input_top_p, input_repetition_penalty, input_max_new_tokens, input_debug_log) -> Generator[str, None, None]:
 	gc.collect()
 	torch.cuda.empty_cache()
  
 	# Create conversation
 	prompt = message['text'].strip()	
-	convo = gguf.create_convo(system_role, history, prompt, input_use_history)
-	if input_show_prompt:
-		print("{}convo = {}{}".format(Fore.LIGHTBLUE_EX,convo,Style.RESET_ALL))
-  
-	streamer = gguf.do_chat(
-			convo=convo,
-			input_temperature=input_temperature, 
-			input_top_k=input_top_k, 
-			input_top_p=input_top_p, 
-			input_repetition_penalty=input_repetition_penalty, 
-			input_max_new_tokens=input_max_new_tokens,
-		)	
+ 
+	files_list=gguf.process_files(message["files"], 0)
+	convo = gguf.create_convo(system_role, history, prompt, use_history=input_use_history, file_list=files_list)
 
-	outputs = ""
-	for msg in streamer:
-		message = msg['choices'][0]['delta']
-		if 'content' in message:
-			outputs += message['content']
-			yield outputs	            
+	yield from gguf.do_chat(
+		convo=convo,
+		input_temperature=input_temperature,
+		input_top_k=input_top_k,
+		input_top_p=input_top_p,
+		input_repetition_penalty=input_repetition_penalty,
+		input_max_new_tokens=input_max_new_tokens,
+		input_debug_log=input_debug_log,
+	)
 
-	if input_show_prompt:
-		print("{}output_text = {}{}".format(Fore.GREEN,outputs,Style.RESET_ALL))
-
+def cancel_btn():	
+	print("{}Cancel button clicked!{}".format(Fore.LIGHTRED_EX, Style.RESET_ALL))	
+	cancel_event.set()
+ 
 if __name__ == "__main__":
 	PATH_TEMPLATE = os.path.splitext(os.path.basename(__file__))[0]
 	PATH_PREFIX, MODEL_USE, N_THREADS, N_THREADS_BATCH, N_GPU_LAYERS, N_CTX, VERBOSE, using_gguf_model, FINETUNE_PATH, LORA_PATH, LORA_SCALE, MMAP, MLOCK, TITLE = parse_arguments(PATH_TEMPLATE)
 	vision_model = check_vision_support(MODEL_USE)
 	if using_gguf_model:
 		gguf.load_model(prefix=PATH_PREFIX, model_name=MODEL_USE, n_threads=N_THREADS, n_threads_batch=N_THREADS_BATCH, n_gpu_layers=N_GPU_LAYERS, n_ctx=N_CTX, verbose=VERBOSE, lora_path=LORA_PATH, lora_scale=LORA_SCALE, use_mmap=MMAP, use_mlock=MLOCK)
+		cancel_event = gguf.cancel_event
 	else:
 		error_message = "Error: Unsupported model type."
 		raise RuntimeError("{}{}{}".format(Fore.LIGHTRED_EX, error_message, Style.RESET_ALL))
@@ -64,7 +59,10 @@ if __name__ == "__main__":
 		)
 	textbox = gr.MultimodalTextbox(file_types=["text", ".json"], file_count="single", max_lines=200)
 		
-	with gr.Blocks() as demo:				
+	with gr.Blocks() as demo:			
+		btn_cancel = gr.Button(value="Cancel", render=False)
+		btn_cancel.click(fn=cancel_btn, inputs=[], outputs=[])	
+  
 		chat_interface = gr.ChatInterface(
 			fn=generate_description,
 			chatbot=chatbot,
@@ -74,6 +72,7 @@ if __name__ == "__main__":
 			textbox=textbox,
 			additional_inputs_accordion=gr.Accordion(label="⚙️ Parameters", open=True, render=False),
 			additional_inputs=[
+				btn_cancel,
 				gr.Dropdown(label="system role", choices=SYSTEM_ROLE, value=SYSTEM_ROLE[0], allow_custom_value=True, render=False),
 				gr.Checkbox(label="Enable Conversations History", value=True, render=False),	
 				gr.Slider(minimum=0.1,
