@@ -144,8 +144,7 @@ def cancel_btn():
 
 if __name__ == "__main__":	
 	PATH_TEMPLATE = os.path.splitext(os.path.basename(__file__))[0]
-	PATH_PREFIX, MODEL_USE, N_THREADS, N_THREADS_BATCH, N_GPU_LAYERS, N_CTX, VERBOSE, using_gguf_model, FINETUNE_PATH, LORA_PATH, LORA_SCALE, MMAP, MLOCK, TITLE = parse_arguments(PATH_TEMPLATE)
-	vision_model = check_vision_support(MODEL_USE)
+	PATH_PREFIX, MODEL_USE, N_THREADS, N_THREADS_BATCH, N_GPU_LAYERS, N_CTX, VERBOSE, using_gguf_model, FINETUNE_PATH, LORA_PATH, LORA_SCALE, MMAP, MLOCK, _, TITLE = parse_arguments(PATH_TEMPLATE)
   
 	if using_gguf_model:
 		gguf.load_model(prefix=PATH_PREFIX, model_name=MODEL_USE, n_threads=N_THREADS, n_threads_batch=N_THREADS_BATCH, n_gpu_layers=N_GPU_LAYERS, n_ctx=N_CTX, verbose=VERBOSE, lora_path=LORA_PATH, lora_scale=LORA_SCALE, use_mmap=MMAP, use_mlock=MLOCK)
@@ -166,11 +165,7 @@ if __name__ == "__main__":
 			layout="bubble",
 		)
 	
-	textbox = None	
-	if not vision_model:
-		textbox = gr.MultimodalTextbox(file_types=["text", ".json"], file_count="single", max_lines=200)
-	else:
-		textbox = gr.MultimodalTextbox(file_types=["image", "text", ".json"], file_count="single", max_lines=200)
+	textbox = gr.MultimodalTextbox(file_types=["text", ".json"], file_count="single", max_lines=200)
 		
 	with gr.Blocks() as demo:		
 		btn_cancel = gr.Button(value="Cancel", render=False)

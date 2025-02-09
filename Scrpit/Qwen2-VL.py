@@ -218,7 +218,7 @@ def cancel_btn():
  
 if __name__ == "__main__":    
 	PATH_TEMPLATE = os.path.splitext(os.path.basename(__file__))[0]
-	PATH_PREFIX, MODEL_USE, N_THREADS, N_THREADS_BATCH, N_GPU_LAYERS, N_CTX, VERBOSE, using_gguf_model, FINETUNE_PATH, LORA_PATH, LORA_SCALE, MMAP, MLOCK, TITLE = parse_arguments(PATH_TEMPLATE)
+	PATH_PREFIX, MODEL_USE, N_THREADS, N_THREADS_BATCH, N_GPU_LAYERS, N_CTX, VERBOSE, using_gguf_model, FINETUNE_PATH, LORA_PATH, LORA_SCALE, MMAP, MLOCK, _, TITLE = parse_arguments(PATH_TEMPLATE)
 	vision_model = check_vision_support(MODEL_USE, '-VL-')
  
 	if using_gguf_model:

@@ -1,4 +1,5 @@
 from lib.gguf_model import llama_gguf
+from llama_cpp.llama_chat_format import Llama3VisionAlpha
 from threading import Thread
 import time
 import spaces
@@ -36,13 +37,13 @@ def load_model(prefix, model_path):
 	tokenizer = AutoTokenizer.from_pretrained(full_path)
 	return model, processor, tokenizer
 
-def create_convo(system_role, history, prompt, files, input_use_history): 
+def create_convo(system_role, history, prompt, files, input_use_history, input_image_size): 
 	convo = [] 
  
 	if not using_gguf_model:
 		convo = create_convo_local(system_role, history, prompt, files, input_use_history)
 	else:
-		files_list=gguf.process_files(files, 0)
+		files_list=gguf.process_files(files, input_image_size)
 		convo = gguf.create_convo(system_role, history, prompt, use_history=input_use_history, file_list=files_list)
 		
 	return convo
@@ -101,7 +102,7 @@ def do_chat(messages, input_debug_log=False):
 		 
 @spaces.GPU()
 @torch.no_grad()
-def generate_description(message: dict, history, btn_cancel, system_role, input_use_history, input_temperature, input_top_k, input_top_p, input_repetition_penalty, input_max_new_tokens, input_debug_log) -> Generator[str, None, None]:
+def generate_description(message: dict, history, btn_cancel, system_role, input_use_history, input_temperature, input_top_k, input_top_p, input_repetition_penalty, input_max_new_tokens, input_debug_log, input_image_size) -> Generator[str, None, None]:
 	if not using_gguf_model:
 		configure_model(input_temperature, input_top_p, input_repetition_penalty, input_max_new_tokens)
 
@@ -109,7 +110,7 @@ def generate_description(message: dict, history, btn_cancel, system_role, input_
 	if input_debug_log:
 		print("{}prompt = {}{}".format(Fore.LIGHTCYAN_EX, prompt, Style.RESET_ALL))
 
-	convo = create_convo(system_role, history, prompt, message["files"], input_use_history)
+	convo = create_convo(system_role, history, prompt, message["files"], input_use_history, input_image_size)
 	cancel_event.clear()	
 	if not using_gguf_model:
 		yield from do_chat(convo, input_debug_log=input_debug_log)
@@ -140,14 +141,21 @@ def cancel_btn():
 
 if __name__ == "__main__":	
 	PATH_TEMPLATE = os.path.splitext(os.path.basename(__file__))[0]
-	PATH_PREFIX, MODEL_USE, N_THREADS, N_THREADS_BATCH, N_GPU_LAYERS, N_CTX, VERBOSE, using_gguf_model, FINETUNE_PATH, LORA_PATH, LORA_SCALE, MMAP, MLOCK, TITLE = parse_arguments(PATH_TEMPLATE)
- 
+	PATH_PREFIX, MODEL_USE, N_THREADS, N_THREADS_BATCH, N_GPU_LAYERS, N_CTX, VERBOSE, using_gguf_model, FINETUNE_PATH, LORA_PATH, LORA_SCALE, MMAP, MLOCK, CHAT_HANDLER, TITLE = parse_arguments(PATH_TEMPLATE)
+	
+	SUPPORT_FILE_TYPE = ["text", ".json"]
 	if using_gguf_model:
-		gguf.load_model(prefix=PATH_PREFIX, model_name=MODEL_USE, n_threads=N_THREADS, n_threads_batch=N_THREADS_BATCH, n_gpu_layers=N_GPU_LAYERS, n_ctx=N_CTX, verbose=VERBOSE, lora_path=LORA_PATH, lora_scale=LORA_SCALE, use_mmap=MMAP, use_mlock=MLOCK)
-		cancel_event = gguf.cancel_event
+		if CHAT_HANDLER:
+			chat_handler = Llama3VisionAlpha(clip_model_path=CHAT_HANDLER, verbose=VERBOSE)
+			gguf.load_model(prefix=PATH_PREFIX, model_name=MODEL_USE, n_threads=N_THREADS, n_threads_batch=N_THREADS_BATCH, n_gpu_layers=N_GPU_LAYERS, n_ctx=N_CTX, verbose=VERBOSE, lora_path=LORA_PATH, lora_scale=LORA_SCALE, use_mmap=MMAP, use_mlock=MLOCK, chat_handler=chat_handler)
+			SUPPORT_FILE_TYPE = ["text", ".json", "image"]
+		else:
+			gguf.load_model(prefix=PATH_PREFIX, model_name=MODEL_USE, n_threads=N_THREADS, n_threads_batch=N_THREADS_BATCH, n_gpu_layers=N_GPU_LAYERS, n_ctx=N_CTX, verbose=VERBOSE, lora_path=LORA_PATH, lora_scale=LORA_SCALE, use_mmap=MMAP, use_mlock=MLOCK)
+		cancel_event = gguf.cancel_event		
 	else:
 		model, processor, tokenizer = load_model(PATH_PREFIX, MODEL_USE)
 		cancel_event = asyncio.Event()
+	
 	
 	avatars_list = ['.\\Images\\avatar_user.png', '.\\Images\\avatar_system.png']
 	chatbot=gr.Chatbot(
@@ -161,7 +169,7 @@ if __name__ == "__main__":
 			layout="bubble",
 		)
  
-	textbox = gr.MultimodalTextbox(file_types=["text", ".json"], file_count="single", max_lines=200)
+	textbox = gr.MultimodalTextbox(file_types=SUPPORT_FILE_TYPE, file_count="single", max_lines=200)
 		
 	with gr.Blocks() as demo:		
 		btn_cancel = gr.Button(value="Cancel", render=False)
@@ -210,6 +218,12 @@ if __name__ == "__main__":
 							label="Max new tokens", 
 							render=False ),			
 				gr.Checkbox(label="Show prompt in log window", value=True, render=False),	
+    			gr.Slider(minimum=128, 
+							maximum=1280,
+							step=64,
+							value=512, 
+							label="Resize Image (only for multiple images)", 
+							render=False ),
 			],
 		)
   

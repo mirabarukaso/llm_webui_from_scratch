@@ -130,9 +130,10 @@ def parse_arguments(path_prefix):
 	parser.add_argument("-ls", "--lora_scale", type=float, default=1.0, help="Lora scale, default 1.0.")
 	parser.add_argument("-ml", "--mlock", type=bool, default=False, help="Force system to keep model in RAM rather than swapping or compressing.")
 	parser.add_argument("-nmm", "--no_mmap", type=bool, default=False, help="Do not memory-map model (slower load but may reduce pageouts if not using mlock.")
+	parser.add_argument("-ch", "--chat_handler", type=str, default=None, help="Load chat handler (CLIP) for gguf vision model.")
 
 	args = parser.parse_args()
 	title = os.path.basename(args.model_use)
-	return args.path_prefix, args.model_use, args.n_threads, args.n_threads_batch, args.n_gpu_layers, args.n_ctx, args.verbose, args.gguf_model, args.finetune_path, args.lora_patch, args.lora_scale, args.mlock, args.no_mmap, title, 
+	return args.path_prefix, args.model_use, args.n_threads, args.n_threads_batch, args.n_gpu_layers, args.n_ctx, args.verbose, args.gguf_model, args.finetune_path, args.lora_patch, args.lora_scale, args.mlock, args.no_mmap, args.chat_handler, title, 
 
 
