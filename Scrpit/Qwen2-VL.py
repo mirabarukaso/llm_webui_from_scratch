@@ -4,7 +4,7 @@ import time
 import spaces
 import torch
 import gradio as gr
-from transformers import Qwen2VLForConditionalGeneration, GenerationConfig, AutoProcessor, TextIteratorStreamer
+from transformers import Qwen2VLForConditionalGeneration, GenerationConfig, AutoProcessor, TextIteratorStreamer, Qwen2_5_VLForConditionalGeneration
 from qwen_vl_utils import process_vision_info
 from PIL import Image
 from typing import Generator
@@ -13,7 +13,6 @@ import gc
 import os
 from lib.basic import check_vision_support, parse_arguments, LATEX_DELIMITERS_SET, SYSTEM_ROLE, MODEL_PATH_TEMPLATE, MyStopCriteria, process_files
 from colorama import Fore, Style
-import mimetypes
 
 MAX_IMAGE_SIZE = 640
 MODEL_USE = ""
@@ -34,7 +33,10 @@ def load_model(prefix, model_path):
 	full_path = MODEL_PATH_TEMPLATE.format(prefix, model_path)
 	print("{}Loading: {}{}".format(Fore.LIGHTGREEN_EX, full_path, Style.RESET_ALL))
 
-	model = Qwen2VLForConditionalGeneration.from_pretrained(full_path, torch_dtype="auto", device_map="auto")
+	if "Qwen2.5-VL" in model_path:
+		model = Qwen2_5_VLForConditionalGeneration.from_pretrained(full_path, torch_dtype="auto", device_map="auto")
+	else:
+		model = Qwen2VLForConditionalGeneration.from_pretrained(full_path, torch_dtype="auto", device_map="auto")
 	model.to("cuda")
    
 	min_pixels = 128 * 28 * 28
@@ -42,41 +44,6 @@ def load_model(prefix, model_path):
 	processor = AutoProcessor.from_pretrained(full_path, min_pixels=min_pixels, max_pixels=max_pixels)
 	
 	return model, processor
-
-def resize_image(image, max_size=384):
-	# Resize the image to ensure its longest side is equal to max_size while maintaining aspect ratio.
-	width, height = image.size
-	out_image = None
- 
-	if width > height:
-		new_width = max_size
-		new_height = int(max_size * height / width)
-		out_image = image.resize((new_width, new_height), Image.LANCZOS)
-	else:
-		new_height = max_size
-		new_width = int(max_size * width / height)
-		out_image = image.resize((new_width, new_height), Image.LANCZOS)
-	 	
-	out_image = out_image.convert("RGB")	
-	return out_image
-
-def resize_images(images, size = MAX_IMAGE_SIZE):
-	resized_image_list = []
-	for image in images:
-		image = resize_image(image, size)
-		resized_image_list.append(image)
-	return resized_image_list
-
-def load_images(images, size = MAX_IMAGE_SIZE):
-	if not images:
-		return None
-
-	image_list = []
-	for image in images:
-		image = Image.open(image)
-		image_list.append(image)
-  
-	return resize_images(image_list, size)
 
 def create_convo(system_role, history, prompt, files, input_use_history, input_image_size): 
 	convo = []
@@ -101,6 +68,7 @@ def create_convo_local(system_role, history, prompt, files, input_use_history, i
 		for entry in history:
 			if entry['role'] == 'user':
 				user_contents = entry['content']
+				user_contents = str(user_contents).replace("<|vision_start|>", "").replace("<|image_pad|>", "").replace("<|vision_end|>", "")
 				user_obj = {'role': 'user', 'content': user_contents}
 				convo.append(user_obj)
 			elif entry['role'] == 'assistant':
@@ -193,10 +161,6 @@ def generate_description(message: dict, history, btn_cancel, system_role, input_
 	if not using_gguf_model:
 		yield from do_chat(convo, input_debug_log=input_debug_log)
 	else:
-		#image_inputs, video_inputs = process_vision_info(convo)
-		#print('image_inputs={}'.format(image_inputs))
-		#print('video_inputs={}'.format(video_inputs))
-  ##TODO:BUG HERE
 		yield from gguf.do_chat(
 			convo=convo,
 			input_temperature=input_temperature,
