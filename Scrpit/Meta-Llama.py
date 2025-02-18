@@ -13,6 +13,7 @@ import os
 from lib.basic import parse_arguments, MyStopCriteria, process_files
 from lib.basic import LATEX_DELIMITERS_SET, SYSTEM_ROLE, MODEL_PATH_TEMPLATE
 from colorama import Fore, Style
+from pathlib import Path
 
 MODEL_USE = ""
 PATH_PREFIX = ""
@@ -28,6 +29,8 @@ start_time = 0
 
 gguf = llama_gguf()		  
 
+system_prompt_prefix = ''
+
 def load_model(prefix, model_path):	 	
 	full_path = MODEL_PATH_TEMPLATE.format(prefix, model_path)
 	print("{}Loading: {}{}".format(Fore.LIGHTGREEN_EX, full_path, Style.RESET_ALL))	
@@ -38,23 +41,25 @@ def load_model(prefix, model_path):
 	return model, processor, tokenizer
 
 def create_convo(system_role, history, prompt, files, input_use_history, input_image_size): 
+	global system_prompt_prefix	
 	convo = [] 
  
 	if not using_gguf_model:
-		convo = create_convo_local(system_role, history, prompt, files, input_use_history)
+		_, file_prompt = process_files(files, vision_model=False, input_image_size=0)
+		convo = create_convo_local(system_role, history, prompt, file_prompt, input_use_history)
 	else:
 		files_list=gguf.process_files(files, input_image_size)
-		convo = gguf.create_convo(system_role, history, prompt, use_history=input_use_history, file_list=files_list)
+		convo = gguf.create_convo(system_role, history, prompt, use_history=input_use_history, file_list=files_list, system_prompt_prefix=system_prompt_prefix)
 		
 	return convo
 
-def create_convo_local(system_role, history, prompt, files, input_use_history):
-	_, file_prompt = process_files(files, vision_model=False, input_image_size=0)
-    
-	convo = [{'role': 'system', 'content': system_role}]
-	if len(history) > 0 and input_use_history:
+def create_convo_local(system_role, history, prompt, file_prompt, use_history=True):
+	convo = [{'role': 'system', 'content': f'{system_role}{system_prompt_prefix}'}]
+  
+	if len(history) > 0 and use_history:
 		convo.extend(history)
 	convo.append({'role': 'user', "content": f'{file_prompt}\n{prompt}'})
+     
 	return convo
 
 def do_chat(messages, input_debug_log=False): 
@@ -102,7 +107,7 @@ def do_chat(messages, input_debug_log=False):
 		 
 @spaces.GPU()
 @torch.no_grad()
-def generate_description(message: dict, history, btn_cancel, system_role, input_use_history, input_temperature, input_top_k, input_top_p, input_repetition_penalty, input_max_new_tokens, input_debug_log, input_image_size) -> Generator[str, None, None]:
+def generate_description(message: dict, history, btn_cancel, btn_system_prefix_u, btn_system_prefix_d, system_role, input_use_history, input_temperature, input_top_k, input_top_p, input_repetition_penalty, input_max_new_tokens, input_debug_log, input_image_size) -> Generator[str, None, None]:
 	if not using_gguf_model:
 		configure_model(input_temperature, input_top_p, input_repetition_penalty, input_max_new_tokens)
 
@@ -123,6 +128,7 @@ def generate_description(message: dict, history, btn_cancel, system_role, input_
 			input_repetition_penalty=input_repetition_penalty,
 			input_max_new_tokens=input_max_new_tokens,
 			input_debug_log=input_debug_log,
+			stop='<|eot_id|>'
 		)
 		
 	gc.collect()
@@ -139,16 +145,30 @@ def cancel_btn():
 		cancel_event.set()			  	
 		print("{}Time used: {} seconds{}".format(Fore.LIGHTGREEN_EX, time.time() - start_time, Style.RESET_ALL))
 
+def upload_file(filepath):
+    global system_prompt_prefix
+    name = Path(filepath).name
+    _, prefix = process_files([filepath], vision_model=False, input_image_size=0)
+    system_prompt_prefix = f'\n{prefix}'
+    return [gr.UploadButton(visible=False), gr.Button(f"Clear prefix {name}", value=filepath, visible=True)]
+
+def clear_file():
+    global system_prompt_prefix 
+    system_prompt_prefix = ''
+    return [gr.UploadButton(visible=True), gr.Button(visible=False)]
+
 if __name__ == "__main__":	
 	PATH_TEMPLATE = os.path.splitext(os.path.basename(__file__))[0]
 	PATH_PREFIX, MODEL_USE, N_THREADS, N_THREADS_BATCH, N_GPU_LAYERS, N_CTX, VERBOSE, using_gguf_model, FINETUNE_PATH, LORA_PATH, LORA_SCALE, MMAP, MLOCK, CHAT_HANDLER, TITLE = parse_arguments(PATH_TEMPLATE)
 	
-	SUPPORT_FILE_TYPE = ["text", ".json"]
+	JSON_FILE_TYPE = ".json"
+	TEXT_FILE_TYPE = "text"
+	SUPPORT_FILE_TYPE = [TEXT_FILE_TYPE, JSON_FILE_TYPE]
+ 
 	if using_gguf_model:
 		if CHAT_HANDLER:
 			chat_handler = Llama3VisionAlpha(clip_model_path=CHAT_HANDLER, verbose=VERBOSE)
-			gguf.load_model(prefix=PATH_PREFIX, model_name=MODEL_USE, n_threads=N_THREADS, n_threads_batch=N_THREADS_BATCH, n_gpu_layers=N_GPU_LAYERS, n_ctx=N_CTX, verbose=VERBOSE, lora_path=LORA_PATH, lora_scale=LORA_SCALE, use_mmap=MMAP, use_mlock=MLOCK, chat_handler=chat_handler)
-			SUPPORT_FILE_TYPE = ["text", ".json", "image"]
+			SUPPORT_FILE_TYPE = [TEXT_FILE_TYPE, JSON_FILE_TYPE, "image"]
 		else:
 			gguf.load_model(prefix=PATH_PREFIX, model_name=MODEL_USE, n_threads=N_THREADS, n_threads_batch=N_THREADS_BATCH, n_gpu_layers=N_GPU_LAYERS, n_ctx=N_CTX, verbose=VERBOSE, lora_path=LORA_PATH, lora_scale=LORA_SCALE, use_mmap=MMAP, use_mlock=MLOCK)
 		cancel_event = gguf.cancel_event		
@@ -171,10 +191,15 @@ if __name__ == "__main__":
  
 	textbox = gr.MultimodalTextbox(file_types=SUPPORT_FILE_TYPE, file_count="single", max_lines=200)
 		
-	with gr.Blocks() as demo:		
+	with gr.Blocks() as demo:		  
 		btn_cancel = gr.Button(value="Cancel", render=False)
 		btn_cancel.click(fn=cancel_btn, inputs=[], outputs=[])
-  	
+	
+		btn_system_prefix_u = gr.UploadButton("System role prefix. Upload a file", file_count="single", file_types=SUPPORT_FILE_TYPE, render=False)		
+		btn_system_prefix_d = gr.Button("Clear the file", visible=False, render=False)
+		btn_system_prefix_u.upload(upload_file, btn_system_prefix_u, [btn_system_prefix_u, btn_system_prefix_d])
+		btn_system_prefix_d.click(clear_file, None, [btn_system_prefix_u, btn_system_prefix_d])
+  
 		chat_interface = gr.ChatInterface(
 			fn=generate_description,
 			chatbot=chatbot,
@@ -185,7 +210,9 @@ if __name__ == "__main__":
 			additional_inputs_accordion=gr.Accordion(label="⚙️ Parameters", open=True, render=False),
 			additional_inputs=[
 				btn_cancel,
-				gr.Dropdown(label="system role", choices=SYSTEM_ROLE, value=SYSTEM_ROLE[0], allow_custom_value=True, render=False),
+				btn_system_prefix_u,
+				btn_system_prefix_d,
+				gr.Dropdown(label="System role", choices=SYSTEM_ROLE, value=SYSTEM_ROLE[0], allow_custom_value=True, render=False),
 				gr.Checkbox(label="Enable Conversations History", value=True, render=False),	
 				gr.Slider(minimum=0.1,
 							maximum=1, 
@@ -198,7 +225,7 @@ if __name__ == "__main__":
 							step=5,
 							value=100,
 							label="Top K",
-	   						render=False),
+							render=False),
 				gr.Slider(minimum=0,
 							maximum=1,
 							step=0.01,
@@ -218,12 +245,12 @@ if __name__ == "__main__":
 							label="Max new tokens", 
 							render=False ),			
 				gr.Checkbox(label="Show prompt in log window", value=True, render=False),	
-    			gr.Slider(minimum=128, 
+				gr.Slider(minimum=128, 
 							maximum=1280,
 							step=64,
 							value=512, 
 							label="Resize Image (only for multiple images)", 
-							render=False ),
+							render=False),
 			],
 		)
   

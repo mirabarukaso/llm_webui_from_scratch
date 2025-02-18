@@ -6,10 +6,11 @@ from typing import Generator
 import gc
 import os
 import base64
-from lib.basic import check_vision_support, parse_arguments
+from lib.basic import parse_arguments, process_files
 from lib.basic import LATEX_DELIMITERS_SET, SYSTEM_ROLE
 from lib.comfyui import comfyui, extract_comfyui_content
 from colorama import Fore, Style
+from pathlib import Path
 
 MODEL_USE = ""
 PATH_PREFIX = ""
@@ -17,6 +18,7 @@ PATH_PREFIX = ""
 gguf = llama_gguf()
 
 cancel_event = None
+system_prompt_prefix = ''
 
 def remove_think_content(history):
 	history = fix_think_content(history)
@@ -45,7 +47,7 @@ def create_convo(system_role, history, prompt, files, input_use_history, input_d
 		history = fix_think_content(history)
 	
 	files_list=gguf.process_files(files, 0)
-	convo = gguf.create_convo(system_role, history, prompt, input_use_history, files_list, no_system_prompt=input_no_system_prompt)
+	convo = gguf.create_convo(system_role, history, prompt, input_use_history, files_list, no_system_prompt=input_no_system_prompt, system_prompt_prefix=system_prompt_prefix)
  	
 	if input_debug_log:
 		print("{}convo = {}{}".format(Fore.LIGHTGREEN_EX, convo, Style.RESET_ALL))
@@ -54,7 +56,7 @@ def create_convo(system_role, history, prompt, files, input_use_history, input_d
 	 
 @spaces.GPU()
 @torch.no_grad()
-def generate_description(message: dict, history, btn_cancel, system_role, input_use_history, input_temperature, input_top_k, input_top_p, input_repetition_penalty, input_max_new_tokens, input_debug_log, input_remove_think, input_no_system_prompt) -> Generator[str, None, None]:	
+def generate_description(message: dict, history, btn_cancel, btn_system_prefix_u, btn_system_prefix_d, system_role, input_use_history, input_temperature, input_top_k, input_top_p, input_repetition_penalty, input_max_new_tokens, input_debug_log, input_remove_think, input_no_system_prompt) -> Generator[str, None, None]:	
 	prompt = message['text'].strip()
 	if input_debug_log:
 		print("{}prompt = {}{}".format(Fore.LIGHTRED_EX, prompt, Style.RESET_ALL))
@@ -68,6 +70,7 @@ def generate_description(message: dict, history, btn_cancel, system_role, input_
 			input_top_p=input_top_p, 
 			input_repetition_penalty=input_repetition_penalty, 
 			input_max_new_tokens=input_max_new_tokens,
+			#stop=['|eot_id|','｜end▁of▁sentence｜']
 			)	
 	
 	outputs = ""
@@ -99,9 +102,25 @@ def cancel_btn():
 	print("{}Cancel button clicked!{}".format(Fore.LIGHTRED_EX, Style.RESET_ALL))	
 	cancel_event.set()
  
+def upload_file(filepath):
+    global system_prompt_prefix
+    name = Path(filepath).name
+    _, prefix = process_files([filepath], vision_model=False, input_image_size=0)
+    system_prompt_prefix = f'\n{prefix}'
+    return [gr.UploadButton(visible=False), gr.Button(f"Clear prefix {name}", value=filepath, visible=True)]
+
+def clear_file():
+    global system_prompt_prefix 
+    system_prompt_prefix = ''
+    return [gr.UploadButton(visible=True), gr.Button(visible=False)]
+ 
 if __name__ == "__main__":	
 	PATH_TEMPLATE = os.path.splitext(os.path.basename(__file__))[0]
 	PATH_PREFIX, MODEL_USE, N_THREADS, N_THREADS_BATCH, N_GPU_LAYERS, N_CTX, VERBOSE, using_gguf_model, FINETUNE_PATH, LORA_PATH, LORA_SCALE, MMAP, MLOCK, _, TITLE = parse_arguments(PATH_TEMPLATE)
+	
+	JSON_FILE_TYPE = ".json"
+	TEXT_FILE_TYPE = "text"
+	SUPPORT_FILE_TYPE = [TEXT_FILE_TYPE, JSON_FILE_TYPE]
  
 	gguf.load_model(prefix=PATH_PREFIX, model_name=MODEL_USE, n_threads=N_THREADS, n_threads_batch=N_THREADS_BATCH, n_gpu_layers=N_GPU_LAYERS, n_ctx=N_CTX, verbose=VERBOSE, lora_path=LORA_PATH, lora_scale=LORA_SCALE, use_mmap=MMAP, use_mlock=MLOCK)
 	cancel_event = gguf.cancel_event
@@ -118,11 +137,17 @@ if __name__ == "__main__":
 			layout="bubble",
 		)
  
-	textbox = gr.MultimodalTextbox(file_types=["text", ".json"], file_count="single", max_lines=200)
+	textbox = gr.MultimodalTextbox(file_types=SUPPORT_FILE_TYPE, file_count="single", max_lines=200)
 		 
 	with gr.Blocks() as demo:		 	
 		btn_cancel = gr.Button(value="Cancel", render=False)
 		btn_cancel.click(fn=cancel_btn, inputs=[], outputs=[])
+		
+		btn_system_prefix_u = gr.UploadButton("System role prefix. Upload a file", file_count="single", file_types=SUPPORT_FILE_TYPE, render=False)		
+		btn_system_prefix_d = gr.Button("Clear the file", visible=False, render=False)
+		btn_system_prefix_u.upload(upload_file, btn_system_prefix_u, [btn_system_prefix_u, btn_system_prefix_d])
+		btn_system_prefix_d.click(clear_file, None, [btn_system_prefix_u, btn_system_prefix_d])
+  
 		chat_interface = gr.ChatInterface(
 			fn=generate_description,
 			chatbot=chatbot,
@@ -133,6 +158,8 @@ if __name__ == "__main__":
 			additional_inputs_accordion=gr.Accordion(label="⚙️ Parameters", open=True, render=False),
 			additional_inputs=[
 				btn_cancel,
+				btn_system_prefix_u,
+				btn_system_prefix_d,
 				gr.Dropdown(label="System Role", choices=SYSTEM_ROLE, value=SYSTEM_ROLE[0], allow_custom_value=True, render=False),
 				gr.Checkbox(label="Enable Conversations History", value=True, render=False),	
 				gr.Slider(minimum=0.1,

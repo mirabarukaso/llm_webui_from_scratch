@@ -73,21 +73,22 @@ def image_to_base64(image):
 	return img_str
 
 def resize_image(image, max_size=384):
-	# Resize the image to ensure its longest side is equal to max_size while maintaining aspect ratio.
-	width, height = image.size
-	out_image = None
- 
-	if width > height:
-		new_width = max_size
-		new_height = int(max_size * height / width)
-		out_image = image.resize((new_width, new_height), Image.LANCZOS)
-	else:
-		new_height = max_size
-		new_width = int(max_size * width / height)
-		out_image = image.resize((new_width, new_height), Image.LANCZOS)
-	 	
-	out_image = out_image.convert("RGB")	
-	return out_image
+    # Resize the image to ensure its longest side is equal to max_size while maintaining aspect ratio.
+    width, height = image.size
+    out_image = image
+
+    if width > max_size or height > max_size:
+        if width > height:
+            new_width = max_size
+            new_height = int(max_size * height / width)
+            out_image = image.resize((new_width, new_height), Image.LANCZOS)
+        else:
+            new_height = max_size
+            new_width = int(max_size * width / height)
+            out_image = image.resize((new_width, new_height), Image.LANCZOS)
+     	
+    out_image = out_image.convert("RGB")	
+    return out_image
 
 def resize_images(images, size = MAX_IMAGE_SIZE):
 	resized_image_list = []
